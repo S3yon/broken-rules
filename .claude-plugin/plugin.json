@@ -1,0 +1,13 @@
+{
+  "name": "broken-rules",
+  "description": "A register of the rules your coding agent broke. Each entry quotes the rule from AGENTS.md, CLAUDE.md or a skill and carries a shell check that fails until the break is fixed. Every scan re-runs the checks and reopens a fix that stopped holding.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "keywords": ["agents", "rules", "agents-md", "claude-md", "regression", "compliance"],
+  "author": {
+    "name": "Seyon Sri",
+    "url": "https://github.com/S3yon"
+  },
+  "homepage": "https://github.com/S3yon/broken-rules",
+  "repository": "https://github.com/S3yon/broken-rules"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "broken-rules",
+  "owner": {
+    "name": "Seyon Sri"
+  },
+  "description": "A register of the rules your coding agent broke, each with a check that fails until the break is fixed.",
+  "plugins": [
+    {
+      "name": "broken-rules",
+      "source": "./",
+      "description": "A register of the rules your coding agent broke, each with a check that fails until the break is fixed.",
+      "version": "0.1.0"
+    }
+  ]
+}
