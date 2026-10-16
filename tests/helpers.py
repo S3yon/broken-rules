@@ -69,8 +69,8 @@ class TempCase(unittest.TestCase):
         return self.git("rev-parse", "HEAD", base=base)
 
     def cli(self, *args, cwd=None, env=None):
-        full = {k: v for k, v in os.environ.items()
-                if k not in ("BROKEN_RULES_FILE", "CLAUDE_PROJECT_DIR")}
+        full = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""),
+                "PYTHONIOENCODING": "utf-8"}
         full.update(env or {})
         r = subprocess.run([sys.executable, SCRIPT, *args], cwd=cwd or self.tmp,
                            capture_output=True, text=True, timeout=60, env=full,

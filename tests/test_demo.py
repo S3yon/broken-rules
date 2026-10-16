@@ -5,6 +5,7 @@ import subprocess
 from helpers import REPO, TempCase, br
 
 RECIPES = os.path.join(REPO, "docs", "recipes.md")
+WHOLE_ENV = r"environ\.(items|copy|keys|values)\(|\*\*os\.environ|dict\(os\.environ"
 
 
 class DemoTest(TempCase):
@@ -33,8 +34,9 @@ class DemoTest(TempCase):
 
 
 class DirectoryChecksTest(TempCase):
-    """What the plugin directory's scanner reads: it treats an environment variable read by a
-    computed name as a possible credential, and inline Python as possible network code."""
+    """What the plugin directory's scanner holds for review: an environment variable read by a
+    computed name, or the whole environment, as a possible credential; inline Python, or a
+    command that copies to a path from its arguments, as possible data leaving the machine."""
 
     def test_env_vars_are_read_by_literal_name(self):
         with open(os.path.join(REPO, "scripts", "broken_rules.py"), encoding="utf-8") as f:
@@ -46,6 +48,13 @@ class DirectoryChecksTest(TempCase):
     def test_demo_has_no_inline_python(self):
         with open(os.path.join(REPO, "examples", "demo.sh"), encoding="utf-8") as f:
             self.assertNotIn("python3 -c", f.read())
+
+    def test_no_code_reads_the_whole_environment(self):
+        for folder, _, files in os.walk(REPO):
+            for name in files:
+                if name.endswith(".py"):
+                    with open(os.path.join(folder, name), encoding="utf-8") as f:
+                        self.assertNotRegex(f.read(), WHOLE_ENV, name)
 
 
 class RecipesTest(TempCase):
