@@ -171,6 +171,8 @@ negation, since `! grep -q X file` also passes when the file is missing: write
 - It sends nothing over the network, collects nothing, and has no telemetry. Everything stays in
   your repo.
 
+Full statement: [PRIVACY.md](PRIVACY.md).
+
 ## Troubleshooting
 
 - `no register`: run `init`, or pass `--register PATH`.
