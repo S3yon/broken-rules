@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # The whole loop in a throwaway git repo: file four broken rules, fix three, verify them,
 # undo one fix and watch it reopen, then show what the agent sees at the next session start.
-# The four breaks are rewritten from a real register. Pass a path to keep the final register.
+# The four breaks are rewritten from a real register. Pass --keep to keep the work folder.
 set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/broken_rules.py"
-KEEP=""
-if [ -n "${1:-}" ]; then KEEP="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; fi
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+if [ "${1:-}" != "--keep" ]; then trap 'rm -rf "$WORK"' EXIT; fi
 cd "$WORK"
 
 br() {   # print the command (evidence and fix shortened to …), then run it
@@ -98,6 +96,7 @@ echo "== What the agent sees at the next session start:"
 echo
 python3 "$SCRIPT" hook session-start --text | sed -E 's#python3 "[^"]*"#python3 broken_rules.py#'
 
-if [ -n "$KEEP" ]; then
-  cp BROKEN-RULES.md "$KEEP"
+if [ "${1:-}" = "--keep" ]; then
+  echo
+  echo "Kept: $WORK"
 fi

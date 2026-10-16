@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 
 from helpers import REPO, TempCase, br
@@ -10,11 +11,13 @@ WHOLE_ENV = r"environ\.(items|copy|keys|values)\(|\*\*os\.environ|dict\(os\.envi
 
 class DemoTest(TempCase):
     def test_demo_runs_the_whole_loop(self):
-        keep = os.path.join(self.tmp, "kept.md")
-        r = subprocess.run(["bash", os.path.join(REPO, "examples", "demo.sh"), keep],
+        r = subprocess.run(["bash", os.path.join(REPO, "examples", "demo.sh"), "--keep"],
                            capture_output=True, text=True, timeout=120)
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
+        work = re.search(r"^Kept: (.+)$", out, re.M).group(1)
+        self.addCleanup(shutil.rmtree, work, True)
+        keep = os.path.join(work, "BROKEN-RULES.md")
         for want in ("FILED B-001", "FILED B-004", "ERROR check passes now",
                      "VERIFIED B-001 check passes; fix commit", "VERIFIED B-003",
                      "REOPENED B-002", "open 1 · fixed 0 · verified 3 · reopened 0 · wontfix 0",
@@ -55,6 +58,10 @@ class DirectoryChecksTest(TempCase):
                 if name.endswith(".py"):
                     with open(os.path.join(folder, name), encoding="utf-8") as f:
                         self.assertNotRegex(f.read(), WHOLE_ENV, name)
+
+    def test_demo_copies_or_sends_nothing_out_of_its_folder(self):
+        with open(os.path.join(REPO, "examples", "demo.sh"), encoding="utf-8") as f:
+            self.assertIsNone(re.search(r"^\s*(cp|mv|scp|rsync|curl|wget)\s", f.read(), re.M))
 
 
 class RecipesTest(TempCase):
