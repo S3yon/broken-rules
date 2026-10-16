@@ -493,3 +493,232 @@ def file_break(register, root, settings, title, rule, severity, evidence, fix, c
     append_entry(register, format_entry(bid, title, rule, ref, severity, today, evidence, fix,
                                         check.strip()))
     return bid, ref
+
+
+# ---- commands -------------------------------------------------------------
+
+TEMPLATE = """---
+sources: {sources}
+timeout: {timeout}
+---
+
+# Broken rules
+
+Rules the agent broke, each with a check that fails while the break is real.
+Statuses: open, fixed (fix commit recorded), verified (check passes, fix commit in HEAD),
+reopened (a fixed or verified check fails again), wontfix (needs a Reason line).
+File a break with `broken_rules.py file`; the format, as an example (inside a fence, so it
+is not an entry):
+
+```markdown
+### B-000 Commit carried an AI co-author line — open
+- **Rule:** "Never add AI co-author lines" (CLAUDE.md:12)
+- **Severity:** high · **Found:** 2026-01-01
+- **Evidence:** commit 3f2a91c ends with a Co-authored-by trailer
+- **Fix:** a commit-msg hook that rejects the trailer
+- **Check:** `! git log -50 --format=%B | grep -qi '^co-authored-by:'`
+- **Fix commit:** —
+- **Last check:** 2026-01-01 fail
+```
+
+## Breaks
+"""
+
+
+def _git_top(cwd):
+    try:
+        r = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=DEFAULT_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def locate_register(cwd, override=None):
+    """--register, else $BROKEN_RULES_FILE, else BROKEN-RULES.md at the git top level of cwd
+    (cwd itself outside git). Relative paths are relative to cwd."""
+    chosen = override or os.environ.get(ENV_REGISTER)
+    if chosen:
+        return os.path.abspath(os.path.join(cwd, os.path.expanduser(chosen)))
+    return os.path.join(_git_top(cwd) or cwd, REGISTER_NAME)
+
+
+def load(path):
+    """(settings, settings_problems, entries). Raises OSError when the register cannot be read."""
+    with open(path, encoding="utf-8") as f:
+        settings, problems = parse_settings(f.read())
+    return settings, problems, parse_register(path)
+
+
+def rule_still_there(entry, root):
+    """None when the entry's quoted rule is still in its source file, else why not."""
+    path, _ = entry["rule_ref"]
+    try:
+        with open(resolve_path(path, root), encoding="utf-8", errors="replace") as f:
+            text, _ = _normalized(f.read())
+    except OSError:
+        return f"rule source {path} not found"
+    want, _ = _normalized(entry["rule"])
+    if want and want in text:
+        return None
+    return f"rule no longer in {path}: the rule changed, so check the entry still applies"
+
+
+def lint_lines(path, root, settings_problems, entries):
+    out = [f"LINT settings {p}" for p in settings_problems]
+    for e in entries:
+        bid = e["id"]
+        out += [f"LINT {bid} {p}" for p in e["problems"]]
+        if not e["severity"]:
+            out.append(f"LINT {bid} no Severity")
+        elif e["severity"] not in SEVERITIES:
+            out.append(f"LINT {bid} severity {e['severity']!r} is not high, med or low")
+        if not e["rule"]:
+            out.append(f"LINT {bid} no Rule line")
+        elif e["rule_ref"] is None:
+            out.append(f"LINT {bid} Rule has no (file:line) source")
+        elif (why := rule_still_there(e, root)):
+            out.append(f"LINT {bid} {why}")
+        if e["status"] == "wontfix" and not e["reason"]:
+            out.append(f"LINT {bid} wontfix with no Reason line")
+    return out
+
+
+def _write_json(json_path, rows):
+    if json_path:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(rows, f, indent=2)
+
+
+def cmd_scan(path, root, write, json_path=None):
+    """run and update: re-check, print moves and the summary; update also writes them."""
+    try:
+        settings, problems, entries = load(path)
+    except OSError as e:
+        print(f"ERROR no register at {path}: {e.strerror or e}; run init first")
+        _write_json(json_path, [])
+        return 1
+    attention = bool(problems)
+    for p in problems:
+        print(f"ERROR settings {p}")
+    results, lines, needs = check_all(entries, root, settings["timeout"])
+    for line in lines:
+        print(line)
+    print(summary(entries, results))
+    _write_json(json_path, [{"id": e["id"], "title": e["title"], "status": e["status"],
+                             "new_status": results[e["id"]][0], "result": results[e["id"]][1]}
+                            for e in entries if e["id"] in results])
+    if write:
+        update_register(path, results, datetime.date.today().isoformat())
+    return 1 if attention or needs else 0
+
+
+def _find(entries, bid):
+    e = next((e for e in entries if e["id"] == bid), None)
+    if e is None:
+        return None, f"ERROR {bid} not in the register"
+    if e["problems"]:
+        return None, f"ERROR {bid} " + "; ".join(e["problems"])
+    return e, None
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="broken_rules.py", description=__doc__.split("\n\n")[0])
+    ap.add_argument("--register", metavar="PATH",
+                    help=f"register file (default: ${ENV_REGISTER}, else {REGISTER_NAME} at the git top level)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("init", help="create the register")
+    fp = sub.add_parser("file", help="file a break; its check must fail now")
+    fp.add_argument("--title", required=True)
+    fp.add_argument("--rule", required=True, help="the rule's exact words, as written in its source")
+    fp.add_argument("--severity", required=True, choices=SEVERITIES)
+    fp.add_argument("--evidence", required=True)
+    fp.add_argument("--fix", required=True)
+    fp.add_argument("--check", required=True, help="shell command: fails while broken, passes once fixed")
+    fp.add_argument("--source", help="the file the rule is in, when more than one source holds it")
+    xp = sub.add_parser("fixed", help="record the fix commit for a break")
+    xp.add_argument("id")
+    xp.add_argument("commit")
+    rp = sub.add_parser("run", help="re-check every break; writes nothing")
+    rp.add_argument("--json", metavar="PATH", help="also write the results as JSON")
+    sub.add_parser("update", help="re-check every break and write the new statuses")
+    cp = sub.add_parser("check", help="run one break's check; writes nothing")
+    cp.add_argument("id")
+    sub.add_parser("lint", help="format problems, and rules that changed since they were quoted")
+    sub.add_parser("next-id", help="print the next free id")
+    hp = sub.add_parser("hook", help="output for an agent hook")
+    hp.add_argument("event", choices=("session-start",))
+    a = ap.parse_args(argv)
+
+    cwd = os.getcwd()
+    if a.cmd == "hook":
+        print(hook_session_start(os.environ.get("CLAUDE_PROJECT_DIR") or cwd, a.register), end="")
+        return 0
+    path = locate_register(cwd, a.register)
+    root = os.path.dirname(path)
+
+    if a.cmd == "init":
+        if os.path.exists(path):
+            print(f"ERROR register already exists: {path}")
+            return 1
+        _write_raw(path, TEMPLATE.format(sources=", ".join(DEFAULT_SOURCES), timeout=DEFAULT_TIMEOUT))
+        print(f"CREATED {path}")
+        return 0
+    if a.cmd in ("run", "update"):
+        return cmd_scan(path, root, a.cmd == "update", getattr(a, "json", None))
+    try:
+        settings, problems, entries = load(path)
+    except OSError as e:
+        print(f"ERROR no register at {path}: {e.strerror or e}; run init first")
+        return 1
+    if a.cmd == "file":
+        try:
+            bid, ref = file_break(path, root, settings, a.title, a.rule, a.severity, a.evidence,
+                                  a.fix, a.check, a.source)
+        except FileError as e:
+            print(f"ERROR {e}")
+            return 1
+        print(f"FILED {bid} {_one_line(a.title)} (rule {ref[0]}:{ref[1]})")
+        return 0
+    if a.cmd == "fixed":
+        e, err = _find(entries, a.id)
+        if err:
+            print(err)
+            return 1
+        if e["status"] not in ("open", "reopened", "fixed"):
+            print(f"ERROR {a.id} is {e['status']}; only an open, reopened or fixed break takes a fix commit")
+            return 1
+        if fix_in_history(a.commit, root) is not True:
+            print(f"ERROR {a.commit} is not a commit in HEAD's history")
+            return 1
+        set_fixed(path, a.id, a.commit)
+        print(f"FIXED {a.id} {a.commit}; run update to verify")
+        return 0
+    if a.cmd == "check":
+        e, err = _find(entries, a.id)
+        if err:
+            print(err)
+            return 1
+        if e["status"] == "wontfix":
+            print(f"NOTE {a.id} wontfix, never checked")
+            return 0
+        result, detail, _ = check_entry(e, root, settings["timeout"])
+        print(f"{result.upper()} {a.id} {detail}")
+        return 0 if result == "pass" else 1
+    if a.cmd == "lint":
+        lines = lint_lines(path, root, problems, entries)
+        for line in lines:
+            print(line)
+        return 1 if lines else 0
+    if a.cmd == "next-id":
+        print(next_id(entries))
+        return 0
+    return 2
+
+
+def hook_session_start(project_dir, override=None):
+    return ""
+
+
+if __name__ == "__main__":
+    sys.exit(main())
