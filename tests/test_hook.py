@@ -34,6 +34,18 @@ class HookTest(TempCase):
         self.assertNotIn("B-013", text)
         self.assertLess(len(text), 10000)
 
+    def test_text_prints_only_what_the_agent_sees(self):
+        self.write("BROKEN-RULES.md", HEAD + entry("B-001", "Open one", "open"))
+        code, out = self.cli("hook", "session-start", "--text")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("BROKEN RULES: 1 rule the agent broke"), out)
+        self.assertIn("- B-001 (open) Open one.", out)
+        self.assertNotIn("hookSpecificOutput", out)
+
+    def test_text_is_silent_when_nothing_is_open(self):
+        self.write("BROKEN-RULES.md", HEAD + entry("B-001", "A", "verified"))
+        self.assertEqual(self.cli("hook", "session-start", "--text"), (0, ""))
+
     def test_register_env_var_names_the_file(self):
         path = self.write("elsewhere/R.md", HEAD + entry("B-001", "Moved", "open"))
         code, out = self.hook(env={"BROKEN_RULES_FILE": path})

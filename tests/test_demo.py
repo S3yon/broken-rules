@@ -43,6 +43,9 @@ class DirectoryChecksTest(TempCase):
         for name in names:
             self.assertRegex(name, r'^"[A-Z_]+"$')
 
+    def test_demo_has_no_inline_python(self):
+        with open(os.path.join(REPO, "examples", "demo.sh"), encoding="utf-8") as f:
+            self.assertNotIn("python3 -c", f.read())
 
 class RecipesTest(TempCase):
     def test_recipes_without_placeholders_run(self):

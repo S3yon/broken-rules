@@ -150,7 +150,7 @@ yours to edit.
 | `check B-NNN` | run one check |
 | `lint` | format problems, and rules whose quoted words are gone from their file |
 | `next-id` | the next free id |
-| `hook session-start` | what the session-start hook prints |
+| `hook session-start [--text]` | what the session-start hook prints; `--text` gives only the text the agent sees |
 
 `run` and `update` exit 1 when a fix reopened, a check could not run, or an entry is malformed.
 A check that times out or exits 126 or 127 (not runnable, not found) is an error, never a pass.

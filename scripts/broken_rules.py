@@ -649,11 +649,12 @@ def main(argv=None):
     sub.add_parser("next-id", help="print the next free id")
     hp = sub.add_parser("hook", help="output for an agent hook")
     hp.add_argument("event", choices=("session-start",))
+    hp.add_argument("--text", action="store_true", help="print only the text the agent sees, not the JSON")
     a = ap.parse_args(argv)
 
     cwd = os.getcwd()
     if a.cmd == "hook":
-        print(hook_session_start(os.environ.get("CLAUDE_PROJECT_DIR") or cwd, a.register), end="")
+        print(hook_session_start(os.environ.get("CLAUDE_PROJECT_DIR") or cwd, a.register, a.text), end="")
         return 0
     path = locate_register(cwd, a.register)
     root = os.path.dirname(path)
@@ -717,10 +718,11 @@ def main(argv=None):
     return 2
 
 
-def hook_session_start(project_dir, override=None):
+def hook_session_start(project_dir, override=None, text=False):
     """SessionStart output: JSON naming the open and reopened breaks, reopened first, at most
-    HOOK_MAX. Empty when there is no register or nothing is open. Never raises: a register that
-    cannot be read gives one plain line, so the hook can never block a session."""
+    HOOK_MAX; with text, only the text the agent sees. Empty when there is no register or nothing
+    is open. Never raises: a register that cannot be read gives one plain line, so the hook can
+    never block a session."""
     path = ""
     try:
         path = locate_register(project_dir, override)
@@ -743,6 +745,8 @@ def hook_session_start(project_dir, override=None):
             lines.append(f"- and {len(active) - HOOK_MAX} more. Full list: python3 \"{SELF}\" run")
         lines.append("When the user corrects you for breaking a written rule, file it with the "
                      "file-break skill.")
+        if text:
+            return "\n".join(lines) + "\n"
         return json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                   "additionalContext": "\n".join(lines)}}) + "\n"
     except Exception as e:      # noqa: BLE001 -- a hook must never block the session

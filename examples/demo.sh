@@ -96,9 +96,7 @@ br update
 
 echo "== What the agent sees at the next session start:"
 echo
-python3 "$SCRIPT" hook session-start \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['hookSpecificOutput']['additionalContext'])" \
-  | sed -E 's#python3 "[^"]*"#python3 broken_rules.py#'
+python3 "$SCRIPT" hook session-start --text | sed -E 's#python3 "[^"]*"#python3 broken_rules.py#'
 
 if [ -n "$KEEP" ]; then
   cp BROKEN-RULES.md "$KEEP"
