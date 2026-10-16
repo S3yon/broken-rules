@@ -32,6 +32,18 @@ class DemoTest(TempCase):
         self.assertEqual([e["status"] for e in entries], ["verified", "reopened", "verified", "open"])
 
 
+class DirectoryChecksTest(TempCase):
+    """What the plugin directory's scanner reads: it treats an environment variable read by a
+    computed name as a possible credential, and inline Python as possible network code."""
+
+    def test_env_vars_are_read_by_literal_name(self):
+        with open(os.path.join(REPO, "scripts", "broken_rules.py"), encoding="utf-8") as f:
+            names = re.findall(r"environ\.get\(([^,)]*)", f.read())
+        self.assertTrue(names)
+        for name in names:
+            self.assertRegex(name, r'^"[A-Z_]+"$')
+
+
 class RecipesTest(TempCase):
     def test_recipes_without_placeholders_run(self):
         with open(RECIPES, encoding="utf-8") as f:

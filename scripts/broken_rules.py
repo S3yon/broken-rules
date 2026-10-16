@@ -26,7 +26,6 @@ import sys
 
 SELF = os.path.abspath(__file__)
 REGISTER_NAME = "BROKEN-RULES.md"
-ENV_REGISTER = "BROKEN_RULES_FILE"
 DEFAULT_SOURCES = ["**/AGENTS.md", "**/CLAUDE.md", "**/SKILL.md", ".claude/**/*.md"]
 DEFAULT_TIMEOUT = 30
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__"}
@@ -539,7 +538,7 @@ def _git_top(cwd):
 def locate_register(cwd, override=None):
     """--register, else $BROKEN_RULES_FILE, else BROKEN-RULES.md at the git top level of cwd
     (cwd itself outside git). Relative paths are relative to cwd."""
-    chosen = override or os.environ.get(ENV_REGISTER)
+    chosen = override or os.environ.get("BROKEN_RULES_FILE")
     if chosen:
         return os.path.abspath(os.path.join(cwd, os.path.expanduser(chosen)))
     return os.path.join(_git_top(cwd) or cwd, REGISTER_NAME)
@@ -627,7 +626,7 @@ def _find(entries, bid):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="broken_rules.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--register", metavar="PATH",
-                    help=f"register file (default: ${ENV_REGISTER}, else {REGISTER_NAME} at the git top level)")
+                    help=f"register file (default: $BROKEN_RULES_FILE, else {REGISTER_NAME} at the git top level)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="create the register")
     fp = sub.add_parser("file", help="file a break; its check must fail now")

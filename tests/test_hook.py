@@ -34,6 +34,12 @@ class HookTest(TempCase):
         self.assertNotIn("B-013", text)
         self.assertLess(len(text), 10000)
 
+    def test_register_env_var_names_the_file(self):
+        path = self.write("elsewhere/R.md", HEAD + entry("B-001", "Moved", "open"))
+        code, out = self.hook(env={"BROKEN_RULES_FILE": path})
+        self.assertEqual(code, 0)
+        self.assertIn("B-001", out)
+
     def test_uses_project_dir(self):
         proj = os.path.join(self.tmp, "proj")
         self.write("BROKEN-RULES.md", HEAD + entry("B-001", "Elsewhere", "open"), base=proj)
