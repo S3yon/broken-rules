@@ -717,7 +717,33 @@ def main(argv=None):
 
 
 def hook_session_start(project_dir, override=None):
-    return ""
+    """SessionStart output: JSON naming the open and reopened breaks, reopened first, at most
+    HOOK_MAX. Empty when there is no register or nothing is open. Never raises: a register that
+    cannot be read gives one plain line, so the hook can never block a session."""
+    path = ""
+    try:
+        path = locate_register(project_dir, override)
+        if not os.path.exists(path):
+            return ""
+        _, _, entries = load(path)
+        active = sorted((e for e in entries if e["status"] in ("open", "reopened")),
+                        key=lambda e: (e["status"] != "reopened", e["id"]))
+        if not active:
+            return ""
+        lines = [f"BROKEN RULES: {len(active)} rule(s) the agent broke in this project are not fixed "
+                 f"yet ({os.path.basename(path)}). Keep them this session:"]
+        for e in active[:HOOK_MAX]:
+            rule = e["rule"] if len(e["rule"]) <= 200 else e["rule"][:197] + "..."
+            ref = f" ({e['rule_ref'][0]}:{e['rule_ref'][1]})" if e["rule_ref"] else ""
+            lines.append(f"- {e['id']} ({e['status']}) {e['title']}. Rule: \"{rule}\"{ref}")
+        if len(active) > HOOK_MAX:
+            lines.append(f"- and {len(active) - HOOK_MAX} more. Full list: python3 \"{SELF}\" run")
+        lines.append("When the user corrects you for breaking a written rule, file it with the "
+                     "file-break skill.")
+        return json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                  "additionalContext": "\n".join(lines)}}) + "\n"
+    except Exception as e:      # noqa: BLE001 -- a hook must never block the session
+        return f"broken-rules: cannot read {path or 'the register'}: {e}\n"
 
 
 if __name__ == "__main__":

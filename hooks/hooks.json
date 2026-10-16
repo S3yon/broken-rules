@@ -1,0 +1,18 @@
+{
+  "description": "At session start, show the agent the rules it broke in this project that are not fixed yet.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/broken_rules.py", "hook", "session-start"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
