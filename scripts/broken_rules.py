@@ -245,7 +245,9 @@ def check_all(entries, root, timeout):
         elif status != "wontfix":
             result, detail, new = check_entry(e, root, timeout)
             results[bid] = (new, result)
-            if new != status:
+            if new == "verified" and status != "verified":
+                lines.append(f"VERIFIED {bid} check passes; fix commit {e['fix_commit']} is in HEAD's history")
+            elif new != status:
                 lines.append(f"{new.upper()} {bid} {detail}")
                 attention = attention or new == "reopened"
             elif result == "error":
@@ -730,8 +732,10 @@ def hook_session_start(project_dir, override=None):
                         key=lambda e: (e["status"] != "reopened", e["id"]))
         if not active:
             return ""
-        lines = [f"BROKEN RULES: {len(active)} rule(s) the agent broke in this project are not fixed "
-                 f"yet ({os.path.basename(path)}). Keep them this session:"]
+        n = len(active)
+        lines = [f"BROKEN RULES: {n} rule{'s' if n > 1 else ''} the agent broke in this project "
+                 f"{'are' if n > 1 else 'is'} not fixed yet ({os.path.basename(path)}). "
+                 f"Keep {'them' if n > 1 else 'it'} this session:"]
         for e in active[:HOOK_MAX]:
             rule = e["rule"] if len(e["rule"]) <= 200 else e["rule"][:197] + "..."
             ref = f" ({e['rule_ref'][0]}:{e['rule_ref'][1]})" if e["rule_ref"] else ""
