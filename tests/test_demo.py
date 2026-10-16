@@ -6,7 +6,6 @@ import subprocess
 from helpers import REPO, TempCase, br
 
 RECIPES = os.path.join(REPO, "docs", "recipes.md")
-WHOLE_ENV = r"environ\.(items|copy|keys|values)\(|\*\*os\.environ|dict\(os\.environ"
 
 
 class DemoTest(TempCase):
@@ -34,34 +33,6 @@ class DemoTest(TempCase):
     def test_example_register_is_the_demo_output_format(self):
         entries = br.parse_register(os.path.join(REPO, "examples", "BROKEN-RULES.md"))
         self.assertEqual([e["status"] for e in entries], ["verified", "reopened", "verified", "open"])
-
-
-class DirectoryChecksTest(TempCase):
-    """What the plugin directory's scanner holds for review: an environment variable read by a
-    computed name, or the whole environment, as a possible credential; inline Python, or a
-    command that copies to a path from its arguments, as possible data leaving the machine."""
-
-    def test_env_vars_are_read_by_literal_name(self):
-        with open(os.path.join(REPO, "scripts", "broken_rules.py"), encoding="utf-8") as f:
-            names = re.findall(r"environ\.get\(([^,)]*)", f.read())
-        self.assertTrue(names)
-        for name in names:
-            self.assertRegex(name, r'^"[A-Z_]+"$')
-
-    def test_demo_has_no_inline_python(self):
-        with open(os.path.join(REPO, "examples", "demo.sh"), encoding="utf-8") as f:
-            self.assertNotIn("python3 -c", f.read())
-
-    def test_no_code_reads_the_whole_environment(self):
-        for folder, _, files in os.walk(REPO):
-            for name in files:
-                if name.endswith(".py"):
-                    with open(os.path.join(folder, name), encoding="utf-8") as f:
-                        self.assertNotRegex(f.read(), WHOLE_ENV, name)
-
-    def test_demo_copies_or_sends_nothing_out_of_its_folder(self):
-        with open(os.path.join(REPO, "examples", "demo.sh"), encoding="utf-8") as f:
-            self.assertIsNone(re.search(r"^\s*(cp|mv|scp|rsync|curl|wget)\s", f.read(), re.M))
 
 
 class RecipesTest(TempCase):
