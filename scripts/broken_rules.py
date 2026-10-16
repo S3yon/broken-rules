@@ -369,3 +369,127 @@ def append_entry(path, entry_text):
     body = re.sub(r"(?:\r?\n[ \t]*)+\Z", "", text)     # blank lines only, never a line's own spaces
     lead = body + nl + nl if body else ""
     _write_raw(path, lead + entry_text.replace("\n", nl))
+
+
+# ---- rule lookup and filing -----------------------------------------------
+
+class RuleError(Exception):
+    """The rule quote cannot be tied to exactly one source file."""
+
+
+class FileError(Exception):
+    """A break cannot be filed as given."""
+
+
+def _normalized(text):
+    """text with `*` and backticks dropped and whitespace runs collapsed to one space, plus the
+    1-based source line of every character kept."""
+    chars, lines, line, space = [], [], 1, True
+    for ch in text:
+        if ch.isspace():
+            if not space:
+                chars.append(" ")
+                lines.append(line)
+                space = True
+        elif ch not in "*`":
+            chars.append(ch)
+            lines.append(line)
+            space = False
+        if ch == "\n":
+            line += 1
+    return "".join(chars).rstrip(), lines
+
+
+def display_path(path, root):
+    """path relative to root when inside it, else with the home folder shown as ~."""
+    path = os.path.abspath(path)
+    rel = os.path.relpath(path, root)
+    if not rel.startswith(os.pardir):
+        return rel
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path.startswith(home + os.sep) else path
+
+
+def resolve_path(path, root):
+    path = os.path.expanduser(path)
+    return path if os.path.isabs(path) else os.path.join(root, path)
+
+
+def source_files(root, sources, exclude=()):
+    """Files the source globs match, in glob order, deduplicated, skipping SKIP_DIRS and exclude."""
+    seen, out = {os.path.realpath(p) for p in exclude}, []
+    for pattern in sources:
+        for p in sorted(glob.glob(resolve_path(pattern, root), recursive=True)):
+            parts = os.path.relpath(p, root).split(os.sep)
+            real = os.path.realpath(p)
+            if os.path.isfile(p) and not SKIP_DIRS.intersection(parts) and real not in seen:
+                seen.add(real)
+                out.append(p)
+    return out
+
+
+def find_rule(quote, root, sources, source=None, exclude=()):
+    """(path, line) of the one source file holding the quote. Matching ignores whitespace runs,
+    `*` and backticks; it is literal and case-sensitive. Raises RuleError when no file or more
+    than one file holds it."""
+    want, _ = _normalized(quote)
+    if not want:
+        raise RuleError("the rule quote is empty")
+    if source:
+        files = [resolve_path(source, root)]
+        if not os.path.isfile(files[0]):
+            raise RuleError(f"source file not found: {source}")
+    else:
+        files = source_files(root, sources, exclude)
+        if not files:
+            raise RuleError("no source files match " + ", ".join(sources))
+    hits = []
+    for path in files:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text, lines = _normalized(f.read())
+        except OSError:
+            continue
+        i = text.find(want)
+        if i >= 0:
+            hits.append((display_path(path, root), lines[i]))
+    if not hits:
+        names = [display_path(p, root) for p in files]
+        more = f" and {len(names) - 5} more" if len(names) > 5 else ""
+        raise RuleError(f"rule not found in {', '.join(names[:5])}{more}; quote its exact words")
+    if len(hits) > 1:
+        raise RuleError("rule found in more than one file, pass --source: "
+                        + ", ".join(f"{p}:{n}" for p, n in hits))
+    return hits[0]
+
+
+def file_break(register, root, settings, title, rule, severity, evidence, fix, check,
+               source=None, today=None):
+    """Append a new open entry. Returns (id, (path, line)). Refuses when the register is missing,
+    a field is empty, the rule is not in exactly one source, or the check does not fail now."""
+    if severity not in SEVERITIES:
+        raise FileError(f"severity must be high, med or low, got {severity!r}")
+    for name, value in (("title", title), ("rule", rule), ("evidence", evidence), ("fix", fix),
+                        ("check", check)):
+        if not str(value or "").strip():
+            raise FileError(f"{name} is empty")
+    if "\n" in check.strip():
+        raise FileError("check must be one line")
+    if not os.path.isfile(register):
+        raise FileError(f"no register at {register}; run init first")
+    entries = parse_register(register)
+    try:
+        ref = find_rule(rule, root, settings["sources"], source, exclude=[register])
+    except RuleError as e:
+        raise FileError(str(e))
+    result, detail = run_check(check.strip(), root, settings["timeout"])
+    if result == "pass":
+        raise FileError("check passes now, so it cannot show the break; "
+                        "write one that fails while the rule is broken")
+    if result == "error":
+        raise FileError(f"check could not run: {detail}")
+    bid = next_id(entries)
+    today = today or datetime.date.today().isoformat()
+    append_entry(register, format_entry(bid, title, rule, ref, severity, today, evidence, fix,
+                                        check.strip()))
+    return bid, ref
