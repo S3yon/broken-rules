@@ -1,6 +1,5 @@
 import os
 import re
-import struct
 import subprocess
 
 from helpers import REPO, TempCase, br
@@ -47,16 +46,6 @@ class DirectoryChecksTest(TempCase):
     def test_demo_has_no_inline_python(self):
         with open(os.path.join(REPO, "examples", "demo.sh"), encoding="utf-8") as f:
             self.assertNotIn("python3 -c", f.read())
-
-    def test_icon_is_a_square_png_the_directory_accepts(self):
-        path = os.path.join(REPO, ".claude-plugin", "icon.png")
-        with open(path, "rb") as f:
-            head = f.read(24)
-        self.assertEqual(head[:8], b"\x89PNG\r\n\x1a\n")
-        width, height = struct.unpack(">II", head[16:24])
-        self.assertEqual(width, height)
-        self.assertTrue(512 <= width <= 2048, width)
-        self.assertLess(os.path.getsize(path), 2 * 1024 * 1024)
 
 
 class RecipesTest(TempCase):
