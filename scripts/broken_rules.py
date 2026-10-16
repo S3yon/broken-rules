@@ -146,3 +146,121 @@ def parse_register(path):
 def next_id(entries):
     nums = [int(m.group(1)) for e in entries if (m := re.match(r"B-(\d+)$", e["id"]))]
     return "B-%03d" % (max(nums, default=0) + 1)
+
+
+# ---- checks ---------------------------------------------------------------
+
+def _short(text):
+    text = " ".join(text.split())
+    return text if len(text) <= DETAIL_MAX else text[:DETAIL_MAX - 3] + "..."
+
+
+def run_check(cmd, root, timeout):
+    """Run one check in a shell, cwd root, stdin at EOF. Returns (pass|fail|error, detail).
+    Only exit 0 is a pass. A timeout, a command that cannot start, or exit 126/127 (not
+    runnable, not found) is error: a check that cannot run proves nothing either way."""
+    if not cmd or not cmd.strip():
+        return "error", "empty check"
+    try:
+        p = subprocess.Popen(cmd, shell=True, cwd=root, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, errors="replace", start_new_session=True)
+    except OSError as e:
+        return "error", f"cannot run {_short(cmd)}: {e}"
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:                     # the whole group, so a pipeline's children die too
+            os.killpg(p.pid, signal.SIGKILL)
+        except (OSError, AttributeError):
+            p.kill()
+        p.communicate()
+        return "error", f"timeout after {timeout}s: {_short(cmd)}"
+    if p.returncode == 0:
+        return "pass", "exit 0"
+    last = next((l for l in reversed(out.splitlines()) if l.strip()), "")
+    tail = f" ({_short(last)})" if last else ""
+    if p.returncode in (126, 127):
+        return "error", f"exit {p.returncode}, command not found or not runnable: {_short(cmd)}{tail}"
+    return "fail", f"exit {p.returncode}: {_short(cmd)}{tail}"
+
+
+def next_status(status, passed, fix_ok):
+    """The status a check result moves an entry to. fix_ok: True when the fix commit is in
+    HEAD's history, False when not, None when none is recorded. Only a fixed or reopened entry
+    whose check passes and whose fix commit resolves is verified; a fixed or verified entry whose
+    check fails is reopened. Everything else, and wontfix always, keeps its status."""
+    if status in ("fixed", "verified") and not passed:
+        return "reopened"
+    if status in ("fixed", "reopened") and passed and fix_ok:
+        return "verified"
+    return status
+
+
+def fix_in_history(commit, root):
+    """True when the commit is an ancestor of HEAD, False when not (a typo, another branch, a
+    rebased-away commit, no git repo), None when no commit is recorded."""
+    if commit is None:
+        return None
+    if not HASH.fullmatch(commit):     # also keeps a value like --help away from git
+        return False
+    try:
+        r = subprocess.run(["git", "-C", root, "merge-base", "--is-ancestor",
+                            f"{commit}^{{commit}}", "HEAD"],
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=DEFAULT_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def check_entry(entry, root, timeout):
+    """Run one entry's check. Returns (result, detail, new_status); result is pass, fail or error.
+    A check that cannot run, and a pass on a fixed or reopened entry whose fix commit is missing
+    or not in HEAD's history, are error and move nothing."""
+    status = entry["status"]
+    result, detail = run_check(entry["check"], root, timeout)
+    if result == "error":
+        return "error", detail, status
+    passed = result == "pass"
+    fix_ok = None
+    if passed and status in ("fixed", "reopened"):
+        fix_ok = fix_in_history(entry["fix_commit"], root)
+        if not fix_ok:
+            why = ("no fix commit recorded" if fix_ok is None
+                   else f"fix commit {entry['fix_commit']} is not in HEAD's history")
+            return "error", why, status
+    return result, detail, next_status(status, passed, fix_ok)
+
+
+def check_all(entries, root, timeout):
+    """Re-check every entry except wontfix. Returns (results, lines, attention): results maps an
+    id to (new_status, result); lines are what to print; attention is True when a person should
+    look (an error, a malformed entry, a reopen). An open entry that still fails prints nothing."""
+    results, lines, attention = {}, [], False
+    for e in entries:
+        bid, status = e["id"], e["status"]
+        if e["problems"]:
+            lines.append(f"ERROR {bid} " + "; ".join(e["problems"]))
+            attention = True
+        elif status != "wontfix":
+            result, detail, new = check_entry(e, root, timeout)
+            results[bid] = (new, result)
+            if new != status:
+                lines.append(f"{new.upper()} {bid} {detail}")
+                attention = attention or new == "reopened"
+            elif result == "error":
+                lines.append(f"ERROR {bid} {detail}")
+                attention = True
+            elif result == "pass" and status == "open":
+                lines.append(f"NOTE {bid} open but check passes; record the fix commit")
+    return results, lines, attention
+
+
+def summary(entries, results):
+    """`open N · fixed N · verified N · reopened N · wontfix N` after the moves in results."""
+    counts = dict.fromkeys(STATUSES, 0)
+    for e in entries:
+        status = results.get(e["id"], (e["status"],))[0]
+        if status in counts:
+            counts[status] += 1
+    return " · ".join(f"{s} {counts[s]}" for s in STATUSES)
