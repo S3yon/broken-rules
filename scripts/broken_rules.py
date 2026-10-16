@@ -264,3 +264,108 @@ def summary(entries, results):
         if status in counts:
             counts[status] += 1
     return " · ".join(f"{s} {counts[s]}" for s in STATUSES)
+
+
+# ---- writing the register -------------------------------------------------
+
+def _read_raw(path):
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def _write_raw(path, text):
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+
+
+def _newline(text):
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def edit_entries(path, edits):
+    """Edit entries in place. edits maps an id to (status or None, {field label: value}). The
+    status word at the end of the heading and each named `- **Label:**` line are replaced; a
+    field line the entry lacks is added after its last line. Every other byte stays as it was,
+    and nothing inside a code fence is touched."""
+    text = _read_raw(path)
+    nl = _newline(text)
+    out, fence, target, seen = [], None, None, set()
+
+    def close_entry():
+        if target is None:
+            return
+        missing = [k for k in target[1] if k not in seen]
+        if not missing:
+            return
+        i = len(out) - 1
+        while i >= 0 and not out[i].strip():
+            i -= 1
+        if i >= 0 and not out[i].endswith("\n"):
+            out[i] += nl
+        for k in reversed(missing):
+            out.insert(i + 1, f"- **{k}:** {target[1][k]}{nl}")
+
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        end = line[len(body):]
+        if fence is not None:
+            if re.fullmatch(r"`{%d,}\s*" % len(fence), body):
+                fence = None
+        elif (m := FENCE_OPEN.match(body)):
+            fence = m.group(1)
+        elif re.match(r"#{1,6} ", body):
+            close_entry()
+            target, seen = None, set()
+            m = HEAD.match(body)
+            if m and m.group(1) in edits:
+                target = edits[m.group(1)]
+                if target[0]:
+                    line = body[:m.start(3)] + target[0] + end
+        elif target is not None:
+            for label, value in target[1].items():
+                if body.startswith(f"- **{label}:**"):
+                    seen.add(label)
+                    line = f"- **{label}:** {value}{end}"
+        out.append(line)
+    close_entry()
+    new = "".join(out)
+    if new != text:
+        _write_raw(path, new)
+
+
+def update_register(path, results, today):
+    """Write check results: results maps an id to (new_status, result)."""
+    edit_entries(path, {bid: (status, {"Last check": f"{today} {result}"})
+                        for bid, (status, result) in results.items()})
+
+
+def set_fixed(path, bid, commit):
+    """Record a fix commit and move the entry to fixed."""
+    edit_entries(path, {bid: ("fixed", {"Fix commit": commit})})
+
+
+def _one_line(text):
+    return " ".join(str(text).split())
+
+
+def format_entry(bid, title, rule, ref, severity, found, evidence, fix, check):
+    """A new open entry. ref is (path, line). A check holding a backtick gets double ticks."""
+    check = _one_line(check)
+    ticked = f"`` {check} ``" if "`" in check else f"`{check}`"
+    return (f"### {bid} {_one_line(title)} — open\n"
+            f"- **Rule:** \"{_one_line(rule)}\" ({ref[0]}:{ref[1]})\n"
+            f"- **Severity:** {severity} · **Found:** {found}\n"
+            f"- **Evidence:** {_one_line(evidence)}\n"
+            f"- **Fix:** {_one_line(fix)}\n"
+            f"- **Check:** {ticked}\n"
+            f"- **Fix commit:** —\n"
+            f"- **Last check:** {found} fail\n")
+
+
+def append_entry(path, entry_text):
+    """Append an entry after exactly one blank line, in the file's own line endings."""
+    text = _read_raw(path)
+    nl = _newline(text)
+    body = re.sub(r"(?:\r?\n[ \t]*)+\Z", "", text)     # blank lines only, never a line's own spaces
+    lead = body + nl + nl if body else ""
+    _write_raw(path, lead + entry_text.replace("\n", nl))
