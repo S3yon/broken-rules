@@ -9,5 +9,7 @@
     "url": "https://github.com/S3yon"
   },
   "homepage": "https://github.com/S3yon/broken-rules",
-  "repository": "https://github.com/S3yon/broken-rules"
+  "repository": "https://github.com/S3yon/broken-rules",
+  "documentationUrl": "https://github.com/S3yon/broken-rules#readme",
+  "privacyPolicyUrl": "https://github.com/S3yon/broken-rules/blob/main/PRIVACY.md"
 }
